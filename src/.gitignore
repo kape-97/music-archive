@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+
+# Build output
+.svelte-kit/
+build/
+dist/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Prisma generated files
+src/generated/prisma/
+
+
+# Local AI assistant configuration
+.agents/
+.claude/
+.windsurf/
+
+# Local editor history
+.history/
+
+# Editor history may contain old secrets and code snapshots
+.history/
+
+# Private audio collection
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.wma
+*.aiff
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+!.env.test

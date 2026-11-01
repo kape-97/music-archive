@@ -1,0 +1,83 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         String    @default("ADMIN")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  sessions     Session[]
+
+  @@map("users")
+}
+
+model Song {
+  id     Int     @id @default(autoincrement())
+  title  String
+  artist String
+  album  String?
+  year   Int?
+
+  durationSeconds Int?                 @map("duration_seconds")
+  fileKey         String               @map("file_key")
+  coverKey        String?              @map("cover_key")
+  isPublished     Boolean              @default(false) @map("is_published")
+  deletionPending Boolean              @default(false) @map("deletion_pending")
+  displayOrder    Int                  @default(0) @map("display_order")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  classifications SongClassification[]
+
+  @@index([isPublished, displayOrder])
+  @@map("songs")
+}
+
+model Classification {
+  id   Int    @id @default(autoincrement())
+  type String
+  name String
+  slug String
+
+  songs SongClassification[]
+
+  @@unique([type, slug])
+  @@unique([type, name])
+  @@index([type])
+  @@map("classifications")
+}
+
+model SongClassification {
+  songId           Int            @map("song_id")
+  classificationId Int            @map("classification_id")
+  song             Song           @relation(fields: [songId], references: [id], onDelete: Cascade)
+  classification   Classification @relation(fields: [classificationId], references: [id], onDelete: Cascade)
+
+  @@id([songId, classificationId])
+  @@index([classificationId])
+  @@map("song_classifications")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique @map("token_hash")
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
