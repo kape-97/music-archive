@@ -99,9 +99,9 @@
   <section class="welcome-panel">
     <div>
       <p class="eyebrow">OVERVIEW</p>
-      <h2>Welcome to your archive.</h2>
+      <h2>Welcome to your archive, Kapil.</h2>
       <p>
-        Manage your curated music collection from one place.
+        Manage your music collection here as administrator.
       </p>
 
       <a class="primary-action" href="/admin/upload">

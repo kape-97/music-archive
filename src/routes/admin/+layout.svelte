@@ -9,16 +9,13 @@
   let logoutError = $state("");
 
   let pageTitle = $derived(
-    page.url.pathname === "/admin"
-      ? "Overview"
-      : page.url.pathname.startsWith("/admin/songs")
-        ? "Music Library"
-        : page.url.pathname.startsWith("/admin/upload")
-          ? "Song Upload"
-          : page.url.pathname.startsWith("/admin/classifications")
-            ? "Classifications"
-            : "Administration"
-  );
+    page.url.pathname === "/admin" ? "Overview"
+    : page.url.pathname.startsWith("/admin/songs") ? "Music Library"
+    : page.url.pathname.startsWith("/admin/upload") ? "Song Upload"
+    : page.url.pathname.startsWith("/admin/classifications") ? "Classifications"
+    : page.url.pathname.startsWith("/admin/publishing") ? "Publishing"
+    : "Administration"
+);
 
   async function handleLogout() {
     if (isLoggingOut) return;
@@ -128,16 +125,17 @@
         <span class="nav-label">Classifications</span>
       </a>
 
-      <div
-        class="nav-item nav-disabled"
-        aria-disabled="true"
-        title="Publishing will be implemented in a future milestone"
-      >
-        <span class="nav-icon" aria-hidden="true">◎</span>
-        <span class="nav-label">Publishing</span>
-        <span class="coming-soon">Later</span>
-      </div>
-    </nav>
+  <a
+    href="/admin/publishing"
+    class="nav-item"
+    class:active={page.url.pathname.startsWith("/admin/publishing")}
+    aria-current={page.url.pathname.startsWith("/admin/publishing") ? "page" : undefined}
+    title="Publishing"
+  >
+    <span class="nav-icon" aria-hidden="true">◎</span>
+    <span class="nav-label">Publishing</span>
+    </a>
+</nav>
 
     <div class="sidebar-bottom">
       <span class="status-dot" aria-hidden="true"></span>
@@ -323,20 +321,6 @@
     font-size: 17px;
   }
 
-  .nav-disabled {
-    color: #69748a;
-    cursor: default;
-  }
-
-  .coming-soon {
-    margin-left: auto;
-    padding: 4px 6px;
-    border: 1px solid #394258;
-    border-radius: 5px;
-    color: #929cb1;
-    font-size: 9px;
-  }
-
   .sidebar-bottom {
     display: flex;
     align-items: center;
@@ -505,10 +489,6 @@
 
     .brand-copy,
     .nav-heading,
-    .nav-label,
-    .coming-soon {
-      display: none;
-    }
 
     .nav-item {
       justify-content: center;

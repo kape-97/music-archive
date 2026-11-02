@@ -1,4 +1,3 @@
-
 /**
  * @typedef {Object} PlayerTrack
  * @property {number} id
@@ -33,10 +32,12 @@
  * @property {() => Promise<boolean>} toggleCurrentTrack
  * @property {() => Promise<boolean>} playNext
  * @property {() => Promise<boolean>} playPrevious
+ * @property {(track: PlayerTrack) => boolean} addToQueue
  * @property {() => void} pause
  * @property {() => void} stop
  * @property {(songId: number) => void} clearTrack
  * @property {(songId: number) => void} removeTrack
+ * @property {() => void} clearQueue
  * @property {(time: number) => boolean} seekTo
  * @property {(track: PlayerTrack) => void} updateTrackMetadata
  * @property {(value: number) => boolean} setVolume
@@ -73,6 +74,26 @@ export function createPlayerController() {
     /** @type {number} */
     let lastNonZeroVolume = 0.8;
 
+    /**
+     * Songs belonging to the currently active catalogue collection.
+     *
+     * The catalogue page supplies this collection when playback
+     * begins from a particular search result or filtered section.
+     *
+     * @type {PlayerTrack[]}
+     */
+    let collectionQueue = [];
+
+    /**
+     * Songs manually added by the listener.
+     *
+     * These songs remain in the queue when the active catalogue
+     * collection changes.
+     *
+     * @type {PlayerTrack[]}
+     */
+    let manualQueue = [];
+
     /** @type {PlayerControllerState} */
     const state = $state({
         currentTrack: null,
@@ -95,6 +116,9 @@ export function createPlayerController() {
 
     /**
      * Validate a track before accepting it.
+     *
+     * Only application-relative audio URLs are accepted.
+     * Direct external URLs and protocol-relative URLs are rejected.
      *
      * @param {PlayerTrack} track
      * @returns {boolean}
@@ -119,25 +143,30 @@ export function createPlayerController() {
     }
 
     /**
-     * Maintain an ordered queue and locate the selected track.
+     * Rebuild the playback queue from the active collection
+     * and manually added songs.
      *
-     * When no new queue is supplied, the existing queue is retained.
+     * Collection songs always appear first.
+     * Manually added songs are appended afterwards.
      *
-     * @param {PlayerTrack} track
-     * @param {PlayerTrack[] | undefined} [tracks]
+     * Duplicate song IDs are removed.
+     *
+     * The selected track is used to synchronize queueIndex.
+     *
+     * @param {PlayerTrack | null} [selectedTrack]
      */
-    function prepareQueue(track, tracks) {
-        const sourceQueue = Array.isArray(tracks)
-            ? tracks
-            : state.queue;
-
+    function syncQueue(selectedTrack = state.currentTrack) {
         /** @type {PlayerTrack[]} */
         const nextQueue = [];
 
         const seenIds = new Set();
 
-        for (const item of sourceQueue) {
-            if (!isPlayableTrack(item) || seenIds.has(item.id)) {
+        // Add songs from the active catalogue collection first.
+        for (const item of collectionQueue) {
+            if (
+                !isPlayableTrack(item) ||
+                seenIds.has(item.id)
+            ) {
                 continue;
             }
 
@@ -145,19 +174,84 @@ export function createPlayerController() {
             seenIds.add(item.id);
         }
 
-        const selectedIndex = nextQueue.findIndex(
+        // Append manually added songs.
+        for (const item of manualQueue) {
+            if (
+                !isPlayableTrack(item) ||
+                seenIds.has(item.id)
+            ) {
+                continue;
+            }
+
+            nextQueue.push({ ...item });
+            seenIds.add(item.id);
+        }
+
+        // Ensure the selected track remains in the queue.
+        if (
+            selectedTrack &&
+            isPlayableTrack(selectedTrack) &&
+            !seenIds.has(selectedTrack.id)
+        ) {
+            nextQueue.unshift({ ...selectedTrack });
+        }
+
+        state.queue = nextQueue;
+
+        // Keep the queue position aligned with the selected song.
+        state.queueIndex = selectedTrack
+            ? nextQueue.findIndex(
+                (item) => item.id === selectedTrack.id
+            )
+            : -1;
+    }
+
+    /**
+     * Prepare the queue for a selected song.
+     *
+     * When a new collection is supplied, it replaces the previous
+     * active collection.
+     *
+     * Manually added songs are retained across collection changes.
+     *
+     * @param {PlayerTrack} track
+     * @param {PlayerTrack[] | undefined} [tracks]
+     */
+    function prepareQueue(track, tracks) {
+        // Replace the active collection only when a new one is supplied.
+        if (Array.isArray(tracks)) {
+            /** @type {PlayerTrack[]} */
+            const nextCollection = [];
+
+            const seenIds = new Set();
+
+            for (const item of tracks) {
+                if (
+                    !isPlayableTrack(item) ||
+                    seenIds.has(item.id)
+                ) {
+                    continue;
+                }
+
+                nextCollection.push({ ...item });
+                seenIds.add(item.id);
+            }
+
+            collectionQueue = nextCollection;
+        }
+
+        // Make sure the selected song belongs to the active collection.
+        const selectedIndex = collectionQueue.findIndex(
             (item) => item.id === track.id
         );
 
         if (selectedIndex === -1) {
-            nextQueue.push({ ...track });
-            state.queueIndex = nextQueue.length - 1;
+            collectionQueue.push({ ...track });
         } else {
-            nextQueue[selectedIndex] = { ...track };
-            state.queueIndex = selectedIndex;
+            collectionQueue[selectedIndex] = { ...track };
         }
 
-        state.queue = nextQueue;
+        syncQueue(track);
     }
 
     /**
@@ -189,6 +283,9 @@ export function createPlayerController() {
 
     /**
      * Start playing a selected song.
+     *
+     * If a collection is supplied, it becomes the active collection.
+     * Otherwise, the existing queue context is retained.
      *
      * @param {PlayerTrack} track
      * @param {PlayerTrack[] | undefined} [tracks]
@@ -278,7 +375,14 @@ export function createPlayerController() {
     }
 
     /**
-     * Toggle playback for a selected track.
+     * Toggle playback for a selected song from a page.
+     *
+     * Public catalogue:
+     * Pass the active collection as the second argument.
+     *
+     * Admin:
+     * Do not pass a collection. Admin playback is intentionally
+     * standalone and resets the queue to the selected song.
      *
      * @param {PlayerTrack} track
      * @param {PlayerTrack[] | undefined} [tracks]
@@ -289,7 +393,17 @@ export function createPlayerController() {
             return playTrack(track);
         }
 
-        prepareQueue(track, tracks);
+        if (Array.isArray(tracks)) {
+            // Public catalogue playback.
+            prepareQueue(track, tracks);
+        } else {
+            // Admin playback is intentionally standalone.
+            // It must not inherit a previous public queue.
+            collectionQueue = [];
+            manualQueue = [];
+
+            prepareQueue(track, [track]);
+        }
 
         const sameTrack =
             state.currentTrack !== null &&
@@ -309,14 +423,27 @@ export function createPlayerController() {
     }
 
     /**
-     * Toggle the currently selected track.
+     * Toggle the currently selected song.
+     *
+     * This method deliberately preserves the existing queue.
+     * It does not reset the active collection or manual additions.
      *
      * @returns {Promise<boolean>}
      */
     async function toggleCurrentTrack() {
-        if (!state.currentTrack) return false;
+        if (!state.currentTrack) {
+            return false;
+        }
 
-        return toggleTrack(state.currentTrack);
+        if (
+            audioElement &&
+            !audioElement.paused
+        ) {
+            pause();
+            return false;
+        }
+
+        return playTrack(state.currentTrack);
     }
 
     /**
@@ -348,6 +475,37 @@ export function createPlayerController() {
     }
 
     /**
+     * Add a song manually to the end of the playback queue.
+     *
+     * Manually added songs are kept separately from the active
+     * catalogue collection.
+     *
+     * A song already present in the queue is not duplicated.
+     *
+     * @param {PlayerTrack} track
+     * @returns {boolean}
+     */
+    function addToQueue(track) {
+        if (!isPlayableTrack(track)) {
+            return false;
+        }
+
+        const alreadyExists = state.queue.some(
+            (item) => item.id === track.id
+        );
+
+        if (alreadyExists) {
+            return false;
+        }
+
+        manualQueue.push({ ...track });
+
+        syncQueue();
+
+        return true;
+    }
+
+    /**
      * Pause without clearing the selected song or queue.
      */
     function pause() {
@@ -361,6 +519,9 @@ export function createPlayerController() {
 
     /**
      * Stop playback and clear the current queue.
+     *
+     * Both the active collection and manually added queue
+     * are cleared.
      */
     function stop() {
         playAttemptId++;
@@ -370,6 +531,10 @@ export function createPlayerController() {
             audioElement.removeAttribute("src");
             audioElement.load();
         }
+
+        // Clear the internal queue sources.
+        collectionQueue = [];
+        manualQueue = [];
 
         state.currentTrack = null;
         state.queue = [];
@@ -385,36 +550,69 @@ export function createPlayerController() {
     }
 
     /**
-     * Remove a song from the queue.
+     * Remove a song from the playback queue.
      *
      * If the song is currently playing, playback is stopped.
      *
+     * Otherwise, the song is removed from both the active
+     * collection and the manually added queue.
+     *
      * @param {number} songId
      */
-    function removeTrack(songId) {
-        if (state.currentTrack?.id === songId) {
-            stop();
-            return;
+    /**
+ * Remove a song from the playback queue.
+ *
+ * Removing the currently playing song stops its playback,
+ * but preserves all other queued songs.
+ *
+ * @param {number} songId
+ */
+function removeTrack(songId) {
+    const isCurrentTrack = state.currentTrack?.id === songId;
+
+    // Remove the song from both internal queue sources.
+    collectionQueue = collectionQueue.filter(
+        (track) => track.id !== songId
+    );
+
+    manualQueue = manualQueue.filter(
+        (track) => track.id !== songId
+    );
+
+    if (isCurrentTrack) {
+        playAttemptId++;
+
+        if (audioElement) {
+            audioElement.pause();
+            audioElement.removeAttribute("src");
+            audioElement.load();
         }
 
-        const removedIndex = state.queue.findIndex(
-            (track) => track.id === songId
-        );
+        state.currentTrack = null;
+        state.isPlaying = false;
+        state.isLoading = false;
 
-        if (removedIndex === -1) return;
+        state.currentTime = 0;
+        state.duration = 0;
 
-        state.queue = state.queue.filter(
-            (track) => track.id !== songId
-        );
+        state.errorMessage = "";
 
-        if (removedIndex < state.queueIndex) {
-            state.queueIndex--;
-        }
+        // Keep the remaining queue.
+        syncQueue(null);
 
-        if (state.queue.length === 0) {
-            state.queueIndex = -1;
-        }
+        return;
     }
+
+    // Preserve the current song and its queue position.
+    syncQueue();
+}
+
+/**
+ * Clear the entire queue and stop playback.
+ */
+function clearQueue() {
+    stop();
+}
 
     /**
      * Clear the player if the selected track matches the given ID.
@@ -472,6 +670,18 @@ export function createPlayerController() {
             return;
         }
 
+        // Keep both internal queue sources synchronized.
+        for (const list of [collectionQueue, manualQueue]) {
+            const index = list.findIndex(
+                (item) => item.id === track.id
+            );
+
+            if (index !== -1) {
+                list[index] = { ...track };
+            }
+        }
+
+        // Update the visible playback queue.
         const queueIndex = state.queue.findIndex(
             (item) => item.id === track.id
         );
@@ -488,6 +698,7 @@ export function createPlayerController() {
             return;
         }
 
+        // Do not silently switch the active audio source.
         if (current.audioUrl !== track.audioUrl) {
             return;
         }
@@ -633,6 +844,7 @@ export function createPlayerController() {
 
     /**
      * Handle playback completion.
+     *
      * Automatically advance when another queued track exists.
      *
      * @param {Event} event
@@ -780,11 +992,13 @@ export function createPlayerController() {
 
         playNext,
         playPrevious,
+        addToQueue,
 
         pause,
         stop,
         clearTrack,
         removeTrack,
+        clearQueue,
 
         seekTo,
         updateTrackMetadata,
